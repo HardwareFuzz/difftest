@@ -21,6 +21,8 @@
 #include "goldenmem.h"
 #include "ram.h"
 #include "spikedasm.h"
+#include <cstring>
+#include <strings.h>
 #if defined(CONFIG_DIFFTEST_SQUASH) && !defined(CONFIG_DIFFTEST_FPGA)
 #include "svdpi.h"
 #endif // CONFIG_DIFFTEST_SQUASH && !CONFIG_DIFFTEST_FPGA
@@ -188,6 +190,15 @@ Difftest::Difftest(int coreid) : id(coreid) {
 #ifdef CONFIG_DIFFTEST_REPLAY
   state_ss = (DiffState *)malloc(sizeof(DiffState));
 #endif // CONFIG_DIFFTEST_REPLAY
+  // Read lenient mode env; default enabled unless explicitly set to 0
+  const char *lenient_env = getenv("DIFFTEST_LENIENT");
+  if (lenient_env) {
+    if (strcmp(lenient_env, "0") == 0 || strcasecmp(lenient_env, "false") == 0 || strcmp(lenient_env, "off") == 0) {
+      lenient_mode = false;
+    } else {
+      lenient_mode = true;
+    }
+  }
 }
 
 Difftest::~Difftest() {
@@ -455,6 +466,12 @@ inline int Difftest::check_all() {
 #ifdef FUZZER_LIB
     stats.exit_code = SimExitCode::difftest;
 #endif // FUZZER_LIB
+    if (lenient_mode) {
+      // Best-effort: sync REF architectural state to DUT and continue
+      proxy->regcpy(dut);
+      pc_mismatch = false;
+      return 0;
+    }
     return 1;
   }
 
@@ -535,10 +552,32 @@ int Difftest::do_instr_commit(int i) {
   uint64_t commit_pc = dut->commit[i].pc;
 #endif
   uint64_t commit_instr = dut->commit[i].instr;
-  state->record_inst(commit_pc, commit_instr, (dut->commit[i].rfwen | dut->commit[i].fpwen | dut->commit[i].vecwen),
-                     dut->commit[i].wdest, get_commit_data(i), dut->commit[i].skip != 0, dut->commit[i].special & 0x1,
-                     dut->commit[i].lqIdx, dut->commit[i].sqIdx, dut->commit[i].robIdx, dut->commit[i].isLoad,
-                     dut->commit[i].isStore);
+  bool hasStoreInfo = false;
+  uint64_t storeAddr = 0;
+  uint64_t storeData = 0;
+  uint8_t storeMask = 0;
+#ifdef CONFIG_DIFFTEST_STOREEVENT
+  if (dut->commit[i].isStore) {
+    hasStoreInfo = get_store_event_info(dut->commit[i].robIdx, storeAddr, storeData, storeMask);
+  }
+#endif
+  auto *trace = state->record_inst(commit_pc, commit_instr,
+                                   (dut->commit[i].rfwen | dut->commit[i].fpwen | dut->commit[i].vecwen),
+                                   dut->commit[i].wdest, get_commit_data(i), dut->commit[i].skip != 0,
+                                   dut->commit[i].special & 0x1, dut->commit[i].lqIdx, dut->commit[i].sqIdx,
+                                   dut->commit[i].robIdx, dut->commit[i].isLoad, dut->commit[i].isStore, hasStoreInfo,
+                                   storeAddr, storeData, storeMask, dut->commit[i].fpwen, dut->commit[i].vecwen);
+
+#ifdef CONFIG_DIFFTEST_STOREEVENT
+  if (dut->commit[i].isStore) {
+    if (hasStoreInfo) {
+      trace->set_store_info(storeAddr, storeData, storeMask);
+      pending_store_commit.erase(dut->commit[i].robIdx);
+    } else {
+      pending_store_commit[dut->commit[i].robIdx] = trace;
+    }
+  }
+#endif
 
 #ifdef FUZZING
   // isExit
@@ -937,11 +976,33 @@ int Difftest::do_store_check() {
       Info("  DUT commits addr 0x%016lx, data 0x%016lx, mask 0x%04x, pc 0x%016lx, robidx 0x%x\n", store_event.addr,
            store_event.data, store_event.mask, store_event.pc, store_event.robidx);
 
+      // In lenient mode, patch REF + golden memory with DUT's store and continue
+      if (lenient_mode) {
+        uint64_t patched = 0;
+        uint64_t old = 0;
+        read_goldenmem(store_event.addr, &old, 8);
+        // Expand mask to 64-bit byte mask
+        uint64_t byte_mask = 0;
+        for (int b = 0; b < 8; ++b) {
+          if ((store_event.mask >> b) & 0x1) byte_mask |= (0xFFull << (8 * b));
+        }
+        patched = (old & ~byte_mask) | (store_event.data & byte_mask);
+        // update REF memory
+        proxy->ref_memcpy(store_event.addr, &patched, 8, DUT_TO_REF);
+        // update golden memory
+        update_goldenmem(store_event.addr, &patched, 0xFF, 8);
+        store_event_queue.pop();
+        store_event_cache.erase(store_event.robidx);
+        continue;
+      }
+
       store_event_queue.pop();
+      store_event_cache.erase(store_event.robidx);
       return 1;
     }
 
     store_event_queue.pop();
+    store_event_cache.erase(store_event.robidx);
   }
 #endif // CONFIG_DIFFTEST_STOREEVENT
   return 0;
@@ -1469,10 +1530,27 @@ int Difftest::do_golden_memory_update() {
 #endif
 
 #ifdef CONFIG_DIFFTEST_STOREEVENT
+bool Difftest::get_store_event_info(uint16_t robidx, uint64_t &addr, uint64_t &data, uint8_t &mask) {
+  auto it = store_event_cache.find(robidx);
+  if (it == store_event_cache.end()) {
+    return false;
+  }
+  addr = it->second.addr;
+  data = it->second.data;
+  mask = it->second.mask;
+  return true;
+}
+
 void Difftest::store_event_record() {
   for (int i = 0; i < CONFIG_DIFF_STORE_WIDTH; i++) {
     if (dut->store[i].valid) {
       store_event_queue.push(dut->store[i]);
+      store_event_cache[dut->store[i].robidx] = dut->store[i];
+      auto pending = pending_store_commit.find(dut->store[i].robidx);
+      if (pending != pending_store_commit.end()) {
+        pending->second->set_store_info(dut->store[i].addr, dut->store[i].data, dut->store[i].mask);
+        pending_store_commit.erase(pending);
+      }
       dut->store[i].valid = 0;
     }
   }

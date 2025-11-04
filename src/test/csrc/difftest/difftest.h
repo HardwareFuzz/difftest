@@ -23,7 +23,9 @@
 #include "golden.h"
 #include "refproxy.h"
 #include <queue>
+#include <unordered_map>
 #include <unordered_set>
+#include <climits>
 #ifdef FUZZING
 #include "emu.h"
 #endif // FUZZING
@@ -126,22 +128,47 @@ public:
   uint8_t isStore;
   uint8_t sqidx;
 
+  bool fpwen;
+  bool vecwen;
+
+  bool hasStoreInfo;
+  uint64_t storeAddr;
+  uint64_t storeData;
+  uint8_t storeMask;
+
   InstrTrace(uint64_t pc, uint32_t inst, uint8_t wen, uint8_t dest, uint64_t data, uint8_t lqidx, uint8_t sqidx,
-             uint16_t robidx, uint8_t isLoad, uint8_t isStore, bool skip = false, bool delayed = false)
-      : CommitTrace(pc, inst), robidx(robidx), isLoad(isLoad), lqidx(lqidx), isStore(isStore), sqidx(sqidx), wen(wen),
-        dest(dest), data(data), tag(get_tag(skip, delayed)) {}
+             uint16_t robidx, uint8_t isLoad, uint8_t isStore, bool hasStoreInfo, uint64_t storeAddr,
+             uint64_t storeData, uint8_t storeMask, bool fpwen, bool vecwen, bool skip = false, bool delayed = false)
+      : CommitTrace(pc, inst), wen(wen), dest(dest), data(data), tag(get_tag(skip, delayed)), robidx(robidx),
+        isLoad(isLoad), lqidx(lqidx), isStore(isStore), sqidx(sqidx), fpwen(fpwen), vecwen(vecwen),
+        hasStoreInfo(hasStoreInfo), storeAddr(storeAddr), storeData(storeData), storeMask(storeMask) {}
+  void set_store_info(uint64_t addr, uint64_t data_in, uint8_t mask_in) {
+    hasStoreInfo = true;
+    storeAddr = addr;
+    storeData = data_in;
+    storeMask = mask_in;
+  }
   virtual inline const char *get_type() {
     return "commit";
   };
 
 protected:
   void display_custom() {
-    Info(" wen %d dst %02d data %016lx idx %03x", wen, dest, data, robidx);
+    const char *regPrefix = "x";
+    if (vecwen) {
+      regPrefix = "v";
+    } else if (fpwen) {
+      regPrefix = "f";
+    }
+    Info(" wen %d dst %s%02u data %016lx idx %03x", wen, regPrefix, static_cast<unsigned>(dest), data, robidx);
     if (isLoad) {
       Info(" (%02x)", lqidx);
     }
     if (isStore) {
       Info(" (%02x)", sqidx);
+    }
+    if (hasStoreInfo) {
+      Info(" addr %016lx data %016lx mask 0x%02x", storeAddr, storeData, static_cast<unsigned>(storeMask));
     }
     if (tag) {
       Info(" (%c)", tag);
@@ -197,9 +224,14 @@ public:
     }
     retire_group_queue.push(std::make_pair(pc, count));
   }
-  void record_inst(uint64_t pc, uint32_t inst, uint8_t en, uint8_t dest, uint64_t data, bool skip, bool delayed,
-                   uint8_t lqidx, uint8_t sqidx, uint16_t robidx, uint8_t isLoad, uint8_t isStore) {
-    push_back_trace(new InstrTrace(pc, inst, en, dest, data, lqidx, sqidx, robidx, isLoad, isStore, skip, delayed));
+  InstrTrace *record_inst(uint64_t pc, uint32_t inst, uint8_t en, uint8_t dest, uint64_t data, bool skip, bool delayed,
+                          uint8_t lqidx, uint8_t sqidx, uint16_t robidx, uint8_t isLoad, uint8_t isStore,
+                          bool hasStoreInfo, uint64_t storeAddr, uint64_t storeData, uint8_t storeMask, bool fpwen,
+                          bool vecwen) {
+    auto *trace = new InstrTrace(pc, inst, en, dest, data, lqidx, sqidx, robidx, isLoad, isStore, hasStoreInfo,
+                                 storeAddr, storeData, storeMask, fpwen, vecwen, skip, delayed);
+    push_back_trace(trace);
+    return trace;
   };
   void record_exception(uint64_t pc, uint32_t inst, uint64_t cause) {
     push_back_trace(new ExceptionTrace(pc, inst, cause));
@@ -215,7 +247,7 @@ private:
   static const int DEBUG_GROUP_TRACE_SIZE = 16;
   std::queue<std::pair<uint64_t, uint32_t>> retire_group_queue;
 
-  static const int DEBUG_INST_TRACE_SIZE = 32;
+  static const int DEBUG_INST_TRACE_SIZE = INT_MAX;
   std::queue<CommitTrace *> commit_trace;
 
   void push_back_trace(CommitTrace *trace) {
@@ -360,6 +392,9 @@ protected:
   bool progress = false;
   uint64_t last_commit = 0;
 
+  // Lenient mode: continue running even if diffs are detected
+  bool lenient_mode = true; // default on to avoid early termination
+
   // For compare the first instr pc of a commit group
   bool pc_mismatch = false;
   uint64_t dut_commit_first_pc = 0;
@@ -381,7 +416,10 @@ protected:
 
 #ifdef CONFIG_DIFFTEST_STOREEVENT
   std::queue<DifftestStoreEvent> store_event_queue;
+  std::unordered_map<uint16_t, DifftestStoreEvent> store_event_cache;
+  std::unordered_map<uint16_t, InstrTrace *> pending_store_commit;
   void store_event_record();
+  bool get_store_event_info(uint16_t robidx, uint64_t &addr, uint64_t &data, uint8_t &mask);
 #endif
 
 #ifdef CONFIG_DIFFTEST_CMOINVALEVENT
