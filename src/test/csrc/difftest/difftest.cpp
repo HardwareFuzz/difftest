@@ -199,6 +199,19 @@ Difftest::Difftest(int coreid) : id(coreid) {
       lenient_mode = true;
     }
   }
+  // Read log-only mode env; default enabled unless explicitly set to 0
+  const char *log_only_env = getenv("DIFFTEST_LOG_ONLY");
+  if (log_only_env) {
+    if (strcmp(log_only_env, "0") == 0 || strcasecmp(log_only_env, "false") == 0 || strcmp(log_only_env, "off") == 0) {
+      log_only_mode = false;
+    } else {
+      log_only_mode = true;
+    }
+  }
+  // In log-only mode, print commit/exception logs as they are recorded
+  if (log_only_mode) {
+    state->dump_commit_trace = true;
+  }
 }
 
 Difftest::~Difftest() {
@@ -321,8 +334,10 @@ int Difftest::step() {
 inline int Difftest::check_all() {
   progress = false;
 
-  if (check_timeout()) {
-    return 1;
+  if (!log_only_mode) {
+    if (check_timeout()) {
+      return 1;
+    }
   }
   do_first_instr_commit();
 
@@ -332,6 +347,16 @@ inline int Difftest::check_all() {
   store_event_record();
 #endif
 
+// Try to flush any already-paired AMO events from previous cycles early
+#ifdef CONFIG_DIFFTEST_ATOMICEVENT
+  atomic_event_record();
+#endif
+
+/* atomic_event_record definition removed here (see global definition below) */
+/* atomic_event_record definition moved to global scope */
+
+// atomic_event_record will be called after commit processing to ensure PC mapping
+
 #ifdef CONFIG_DIFFTEST_SQUASH
 #ifdef CONFIG_DIFFTEST_LOADEVENT
   load_event_record();
@@ -339,13 +364,17 @@ inline int Difftest::check_all() {
 #endif // CONFIG_DIFFTEST_SQUASH
 
 #ifdef DEBUG_GOLDENMEM
-  if (do_golden_memory_update()) {
-    return 1;
+  if (!log_only_mode) {
+    if (do_golden_memory_update()) {
+      return 1;
+    }
   }
 #endif
 
 #ifdef CONFIG_DIFFTEST_CMOINVALEVENT
-  cmo_inval_event_record();
+  if (!log_only_mode) {
+    cmo_inval_event_record();
+  }
 #endif // CONFIG_DIFFTEST_CMOINVALEVENT
 
 #ifdef DEBUG_REFILL
@@ -425,9 +454,11 @@ inline int Difftest::check_all() {
           return 1;
         }
 #ifndef CONFIG_DIFFTEST_SQUASH
-        do_load_check(i);
-        if (do_store_check()) {
-          return 1;
+        if (!log_only_mode) {
+          do_load_check(i);
+          if (do_store_check()) {
+            return 1;
+          }
         }
 #endif // CONFIG_DIFFTEST_SQUASH
         dut->commit[i].valid = 0;
@@ -436,25 +467,33 @@ inline int Difftest::check_all() {
     }
   }
 
-  if (update_delayed_writeback()) {
-    return 1;
+  if (!log_only_mode) {
+    if (update_delayed_writeback()) {
+      return 1;
+    }
   }
 
   if (!progress) {
     return 0;
   }
 
-  proxy->sync();
-
-  if (num_commit > 0) {
-    state->record_group(dut->commit[0].pc, num_commit);
+  if (!log_only_mode) {
+    proxy->sync();
   }
 
-  if (apply_delayed_writeback()) {
-    return 1;
+  if (!log_only_mode) {
+    if (num_commit > 0) {
+      state->record_group(dut->commit[0].pc, num_commit);
+    }
   }
 
-  if (proxy->compare(dut) || pc_mismatch) {
+  if (!log_only_mode) {
+    if (apply_delayed_writeback()) {
+      return 1;
+    }
+  }
+
+  if (!log_only_mode && (proxy->compare(dut) || pc_mismatch)) {
 #ifdef FUZZING
     if (in_disambiguation_state()) {
       Info("Mismatch detected with a disambiguation state at pc = 0x%lx.\n", dut->trap.pc);
@@ -569,12 +608,14 @@ int Difftest::do_instr_commit(int i) {
                                    storeAddr, storeData, storeMask, dut->commit[i].fpwen, dut->commit[i].vecwen);
 
 #ifdef CONFIG_DIFFTEST_STOREEVENT
-  if (dut->commit[i].isStore) {
-    if (hasStoreInfo) {
-      trace->set_store_info(storeAddr, storeData, storeMask);
-      pending_store_commit.erase(dut->commit[i].robIdx);
-    } else {
-      pending_store_commit[dut->commit[i].robIdx] = trace;
+  if (!log_only_mode) {
+    if (dut->commit[i].isStore) {
+      if (hasStoreInfo) {
+        trace->set_store_info(storeAddr, storeData, storeMask);
+        pending_store_commit.erase(dut->commit[i].robIdx);
+      } else {
+        pending_store_commit[dut->commit[i].robIdx] = trace;
+      }
     }
   }
 #endif
@@ -593,6 +634,11 @@ int Difftest::do_instr_commit(int i) {
 
   progress = true;
   update_last_commit();
+
+  // Record atomic commit pc for later atomic memory log
+  if ((commit_instr & 0x7f) == 0x2f) { // AMO/LR/SC opcode
+    pending_atomic_pc.push(commit_pc);
+  }
 
   // isDelayeWb
   if (dut->commit[i].special & 0x1) {
@@ -1546,10 +1592,17 @@ void Difftest::store_event_record() {
     if (dut->store[i].valid) {
       store_event_queue.push(dut->store[i]);
       store_event_cache[dut->store[i].robidx] = dut->store[i];
-      auto pending = pending_store_commit.find(dut->store[i].robidx);
-      if (pending != pending_store_commit.end()) {
-        pending->second->set_store_info(dut->store[i].addr, dut->store[i].data, dut->store[i].mask);
-        pending_store_commit.erase(pending);
+      if (!log_only_mode) {
+        auto pending = pending_store_commit.find(dut->store[i].robidx);
+        if (pending != pending_store_commit.end()) {
+          pending->second->set_store_info(dut->store[i].addr, dut->store[i].data, dut->store[i].mask);
+          pending_store_commit.erase(pending);
+        }
+      }
+      if (log_only_mode) {
+        // Print a concise memory write log line for parsing in log-only mode
+        Info("mem pc %016lx addr %016lx data %016lx mask 0x%02x\n", dut->store[i].pc, dut->store[i].addr,
+             dut->store[i].data, (unsigned)dut->store[i].mask);
       }
       dut->store[i].valid = 0;
     }
@@ -1747,6 +1800,116 @@ void Difftest::do_sync_custom_mflushpwr() {
   }
 }
 #endif
+
+#ifdef CONFIG_DIFFTEST_ATOMICEVENT
+void Difftest::atomic_event_record() {
+  // Stage 1: buffer atomic event
+  if (dut->atomic.valid) {
+    AtomicLog ev;
+    ev.addr = dut->atomic.addr;
+    ev.mask = dut->atomic.mask;
+    ev.fuop = dut->atomic.fuop;
+    ev.data0 = dut->atomic.data[0];
+    ev.out0  = dut->atomic.out[0];
+    ev.cmp0  = dut->atomic.cmp[0];
+    ev.out1  = dut->atomic.out[1];
+    ev.cmp1  = dut->atomic.cmp[1];
+    pending_atomic_events.push(ev);
+    dut->atomic.valid = 0;
+  }
+
+  // Stage 2: pair event with AMO commit pc and print
+  while (!pending_atomic_events.empty() && !pending_atomic_pc.empty()) {
+    uint64_t log_pc = pending_atomic_pc.front();
+    pending_atomic_pc.pop();
+    auto ev = pending_atomic_events.front();
+    pending_atomic_events.pop();
+
+    uint64_t addr = ev.addr;
+    uint16_t mask = ev.mask;
+    uint8_t fuop = ev.fuop;
+
+    auto print_mem = [&](uint64_t a, uint64_t d, uint8_t m) {
+      if (log_only_mode) {
+        Info("mem pc %016lx addr %016lx data %016lx mask 0x%02x\n", log_pc, a, d, (unsigned)m);
+      }
+    };
+
+  auto amo32 = [&](uint32_t rs, uint32_t t, uint32_t cmp) -> uint32_t {
+    uint32_t ret = t;
+    switch (fuop) {
+      case 002: case 003: ret = t; break;
+      case 006: case 007: ret = rs; break;
+      case 012: case 013: ret = rs; break;
+      case 016: case 017: ret = t + rs; break;
+      case 022: case 023: ret = (t ^ rs); break;
+      case 026: case 027: ret = t & rs; break;
+      case 032: case 033: ret = t | rs; break;
+      case 036: case 037: ret = ((int32_t)t < (int32_t)rs) ? t : rs; break;
+      case 042: case 043: ret = ((int32_t)t > (int32_t)rs) ? t : rs; break;
+      case 046: case 047: ret = (t < rs) ? t : rs; break;
+      case 052: case 053: ret = (t > rs) ? t : rs; break;
+      case 054: case 056: case 057: ret = (t == cmp) ? rs : t; break;
+      default: ret = t; break;
+    }
+    return ret;
+  };
+
+  auto amo64 = [&](uint64_t rs, uint64_t t, uint64_t cmp) -> uint64_t {
+    uint64_t ret = t;
+    switch (fuop) {
+      case 002: case 003: ret = t; break;
+      case 006: case 007: ret = rs; break;
+      case 012: case 013: ret = rs; break;
+      case 016: case 017: ret = t + rs; break;
+      case 022: case 023: ret = (t ^ rs); break;
+      case 026: case 027: ret = t & rs; break;
+      case 032: case 033: ret = t | rs; break;
+      case 036: case 037: ret = ((int64_t)t < (int64_t)rs) ? t : rs; break;
+      case 042: case 043: ret = ((int64_t)t > (int64_t)rs) ? t : rs; break;
+      case 046: case 047: ret = (t < rs) ? t : rs; break;
+      case 052: case 053: ret = (t > rs) ? t : rs; break;
+      case 054: case 056: case 057: ret = (t == cmp) ? rs : t; break;
+      default: ret = t; break;
+    }
+    return ret;
+  };
+
+  if (mask == 0xff) {
+    uint64_t rs = ev.data0;
+    uint64_t t  = ev.out0;
+    uint64_t cmp= ev.cmp0;
+    uint64_t ret = amo64(rs, t, cmp);
+    print_mem(addr, ret, 0xff);
+    continue;
+  }
+
+  if (mask == 0x0f || mask == 0xf0) {
+    uint32_t rs = (uint32_t)ev.data0;
+    uint32_t t  = (uint32_t)ev.out0;
+    uint32_t cmp= (uint32_t)ev.cmp0;
+    uint32_t ret = amo32(rs, t, cmp);
+    uint64_t data64 = (mask == 0x0f) ? (uint64_t)ret : ((uint64_t)ret << 32);
+    uint64_t a = (addr & ~0x7ull);
+    print_mem(a, data64, (uint8_t)mask);
+    continue;
+  }
+
+  if (mask == 0xffff) {
+    uint64_t outl = ev.out0;
+    uint64_t outh = ev.out1;
+    uint64_t cmpl = ev.cmp0;
+    uint64_t cmph = ev.cmp1;
+    bool success = (outl == cmpl) && (outh == cmph);
+    uint64_t retl = success ? ev.data0 : outl;
+    uint64_t reth = success ? 0 /* no data1 available in our log */ : outh;
+    print_mem(addr, retl, 0xff);
+    print_mem(addr + 8, reth, 0xff);
+    continue;
+  }
+  }
+}
+#endif // CONFIG_DIFFTEST_ATOMICEVENT
 
 void Difftest::display() {
   Info("\n==============  In the last commit group  ==============\n");

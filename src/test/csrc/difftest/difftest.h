@@ -394,6 +394,8 @@ protected:
 
   // Lenient mode: continue running even if diffs are detected
   bool lenient_mode = true; // default on to avoid early termination
+  // Log-only mode: disable diff checks and only print DUT commit/exception logs
+  bool log_only_mode = true; // default on for temporary modification
 
   // For compare the first instr pc of a commit group
   bool pc_mismatch = false;
@@ -418,8 +420,21 @@ protected:
   std::queue<DifftestStoreEvent> store_event_queue;
   std::unordered_map<uint16_t, DifftestStoreEvent> store_event_cache;
   std::unordered_map<uint16_t, InstrTrace *> pending_store_commit;
+  std::queue<uint64_t> pending_atomic_pc;
+  struct AtomicLog {
+    uint64_t addr;
+    uint16_t mask;
+    uint8_t  fuop;
+    uint64_t data0; // rs
+    uint64_t out0;  // t
+    uint64_t cmp0;  // cmp
+    uint64_t out1;  // for 128b
+    uint64_t cmp1;  // for 128b
+  };
+  std::queue<AtomicLog> pending_atomic_events;
   void store_event_record();
   bool get_store_event_info(uint16_t robidx, uint64_t &addr, uint64_t &data, uint8_t &mask);
+  void atomic_event_record();
 #endif
 
 #ifdef CONFIG_DIFFTEST_CMOINVALEVENT
