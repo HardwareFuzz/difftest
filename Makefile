@@ -326,4 +326,4 @@ else
 	@echo "Please run \"pip install --user clang-format==$(CLANG_FORMAT_VER)\", then set PATH manually"
 endif
 
-.PHONY: sim-verilog emu difftest_verilog clean format scala-format clang-format
+.PHONY: sim-verilog emu emu-cov difftest_verilog clean format scala-format clang-format

@@ -57,6 +57,7 @@ struct EmuArgs {
   const char *trace_name = nullptr;
   const char *footprints_name = nullptr;
   const char *linearized_name = nullptr;
+  const char *coverage_file = nullptr;
   bool enable_waveform = false;
   bool enable_waveform_full = false;
   bool enable_ref_trace = false;

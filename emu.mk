@@ -14,13 +14,21 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
-EMU_ELF_NAME = emu
+EMU_ELF_BASE = emu
 # the target is named as fuzzer for clarity in fuzzing
 ifneq ($(FUZZER_LIB), )
-EMU_ELF_NAME = fuzzer
+EMU_ELF_BASE = fuzzer
 endif
 
-EMU          = $(BUILD_DIR)/$(EMU_ELF_NAME)
+EMU_ELF_SUFFIX =
+ifeq ($(EMU_COVERAGE),1)
+EMU_ELF_SUFFIX = -cov
+else ifeq ($(EMU_COVERAGE_LIGHT),1)
+EMU_ELF_SUFFIX = -cov-light
+endif
+
+EMU_ELF_NAME  = $(EMU_ELF_BASE)$(EMU_ELF_SUFFIX)
+EMU           = $(BUILD_DIR)/$(EMU_ELF_NAME)
 EMU_TOP      = SimTop
 
 EMU_CSRC_DIR   = $(abspath ./src/test/csrc/emu)
@@ -76,6 +84,12 @@ ifeq ($(GSIM),1)
 else
 	@$(MAKE) emu-verilator
 endif
+
+emu-cov:
+	@$(MAKE) EMU_COVERAGE=1 emu-verilator
+
+emu-cov-light:
+	@$(MAKE) EMU_COVERAGE_LIGHT=1 emu-verilator
 
 emu-mk: verilator-emu-mk
 

@@ -15,7 +15,13 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
+ifeq ($(EMU_COVERAGE),1)
+VERILATOR_BUILD_DIR = $(BUILD_DIR)/verilator-compile-cov
+else ifeq ($(EMU_COVERAGE_LIGHT),1)
+VERILATOR_BUILD_DIR = $(BUILD_DIR)/verilator-compile-cov-light
+else
 VERILATOR_BUILD_DIR = $(BUILD_DIR)/verilator-compile
+endif
 VERILATOR_TARGET = $(VERILATOR_BUILD_DIR)/$(EMU_ELF_NAME)
 
 ########## Verilator Configuration Options ##########
@@ -69,7 +75,9 @@ VERILATOR_FLAGS += --savable
 endif
 
 ifeq ($(EMU_COVERAGE),1)
-VERILATOR_FLAGS += --coverage-line --coverage-toggle
+VERILATOR_FLAGS += --coverage --coverage-line --coverage-toggle
+else ifeq ($(EMU_COVERAGE_LIGHT),1)
+VERILATOR_FLAGS += --coverage-line --coverage-user --coverage-max-width 0
 endif
 
 # C optimization

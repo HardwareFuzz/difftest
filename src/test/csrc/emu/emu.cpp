@@ -23,6 +23,7 @@
 #include "remote_bitbang.h"
 #include "sdcard.h"
 #include <getopt.h>
+#include <filesystem>
 #include <signal.h>
 #include <sys/resource.h>
 #ifndef CONFIG_NO_DIFFTEST
@@ -103,6 +104,7 @@ static inline void print_help(const char *file) {
 #endif
 #if VM_COVERAGE == 1
   printf("      --dump-coverage        enable coverage dump\n");
+  printf("      --coverage-file=PATH   dump coverage data to PATH (implies --dump-coverage)\n");
 #endif // VM_COVERAGE
   printf("      --load-difftrace=NAME  load from trace NAME\n");
   printf("      --dump-difftrace=NAME  dump to trace NAME\n");
@@ -154,6 +156,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
     { "overwrite-auto",    1, NULL,  0  },
     { "instr-trace",       1, NULL,  0  },
     { "copy-ram",          1, NULL,  0  },
+    { "coverage-file",     1, NULL,  0  },
     { "seed",              1, NULL, 's' },
     { "max-cycles",        1, NULL, 'C' },
     { "fork-interval",     1, NULL, 'X' },
@@ -263,6 +266,14 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
           case 27: args.overwrite_nbytes_autoset = true; continue;
           case 28: args.instr_trace = optarg; continue;
           case 29: args.copy_ram_offset = parse_ramsize(optarg); continue;
+          case 30:
+#if VM_COVERAGE == 1
+            args.dump_coverage = true;
+            args.coverage_file = optarg;
+#else
+            printf("[WARN] coverage is not enabled at compile time, ignore --coverage-file\n");
+#endif // VM_COVERAGE
+            continue;
         }
         // fall through
       default: print_help(argv[0]); exit(0);
@@ -905,9 +916,19 @@ int Emulator::is_good() {
 
 #if VM_COVERAGE == 1
 void Emulator::save_coverage() {
-  const char *p = create_noop_filename(".coverage.dat");
-  Info("dump coverage data to %s...\n", p);
-  coverage->write(p);
+  std::string path = args.coverage_file ? args.coverage_file : create_noop_filename(".coverage.dat");
+  auto dir = std::filesystem::path(path).parent_path();
+  if (!dir.empty()) {
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+      const auto dir_str = dir.string();
+      const auto err_str = ec.message();
+      Info("failed to create coverage dir %s: %s\n", dir_str.c_str(), err_str.c_str());
+    }
+  }
+  Info("dump coverage data to %s...\n", path.c_str());
+  coverage->write(path.c_str());
 }
 #endif
 
