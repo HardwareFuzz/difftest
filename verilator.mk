@@ -83,6 +83,12 @@ endif
 # C optimization
 OPT_FAST ?= -O3
 
+# Limit parallel C++ compilation to avoid OOM on large designs.
+# Override via EMU_BUILD_JOBS=<N> when more memory is available.
+EMU_BUILD_JOBS ?= 1
+# Use jobserver when possible; fall back to explicit -jN.
+VERILATOR_MAKE_JOBS := $(if $(filter --jobserver%,$(MAKEFLAGS)),-j,$(if $(EMU_BUILD_JOBS),-j$(EMU_BUILD_JOBS),))
+
 ########## Verilator Build Recipes ##########
 VERILATOR_FLAGS_ALL =               \
   --exe $(EMU_OPTIMIZE)             \
@@ -136,7 +142,7 @@ EMU_COMPILE_FILTER =
 verilator-build-emu:
 ifeq ($(REMOTE),localhost)
 	@sync -d $(BUILD_DIR) -d $(VERILATOR_BUILD_DIR)
-	$(TIME_CMD) $(MAKE) -s VM_PARALLEL_BUILDS=1 OPT_SLOW="-O0" \
+	$(TIME_CMD) $(MAKE) -s $(VERILATOR_MAKE_JOBS) VM_PARALLEL_BUILDS=1 OPT_SLOW="-O0" \
 						OPT_FAST=$(OPT_FAST) \
 						PGO_CFLAGS=$(PGO_CFLAGS) \
 						PGO_LDFLAGS=$(PGO_LDFLAGS) \
@@ -145,7 +151,7 @@ ifeq ($(REMOTE),localhost)
 else
 	ssh -tt $(REMOTE) 'export NOOP_HOME=$(NOOP_HOME); \
 					   $(MAKE) -C $(NOOP_HOME)/difftest verilator-build-emu \
-					   -j `nproc` \
+					   -j $(EMU_BUILD_JOBS) \
 					   OPT_FAST="'"$(OPT_FAST)"'" \
 					   PGO_CFLAGS="'"$(PGO_CFLAGS)"'" \
 					   PGO_LDFLAGS="'"$(PGO_LDFLAGS)"'"'
