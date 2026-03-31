@@ -17,15 +17,40 @@
 
 NOOP_HOME  ?= $(abspath .)
 export NOOP_HOME
+MILL ?= $(if $(wildcard $(NOOP_HOME)/mill),$(NOOP_HOME)/mill,mill)
 
 SIM_TOP    ?= SimTop
 DESIGN_DIR ?= $(NOOP_HOME)
 
-BUILD_DIR  = $(DESIGN_DIR)/build
+BUILD_DIR  ?= $(DESIGN_DIR)/build
 
 RTL_DIR = $(BUILD_DIR)/rtl
 RTL_SUFFIX ?= sv
 SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).$(RTL_SUFFIX)
+SIM_TOP_FIR = $(RTL_DIR)/$(SIM_TOP).fir
+
+$(SIM_TOP_V): $(SIM_TOP_FIR)
+	@set -e; \
+	if [ -f "$@" ]; then exit 0; fi; \
+	firtool_bin="${FIRTOOL:-}"; \
+	if [ -z "$$firtool_bin" ]; then \
+		if [ -x "$$HOME/.cache/llvm-firtool/1.135.0/bin/firtool" ]; then \
+			firtool_bin="$$HOME/.cache/llvm-firtool/1.135.0/bin/firtool"; \
+		else \
+			for p in "$$HOME"/.cache/llvm-firtool/*/bin/firtool; do \
+				if [ -x "$$p" ]; then firtool_bin="$$p"; fi; \
+			done; \
+		fi; \
+	fi; \
+	if [ -z "$$firtool_bin" ] || [ ! -x "$$firtool_bin" ]; then \
+		echo "[error] firtool not found. Set FIRTOOL or install llvm-firtool cache under ~/.cache/llvm-firtool" >&2; \
+		exit 1; \
+	fi; \
+	"$$firtool_bin" "$<" --verilog -o "$@" \
+		-O=release \
+		--disable-annotation-unknown \
+		--lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none \
+		--default-layer-specialization=enable
 
 # generate difftest files for non-chisel design.
 .DEFAULT_GOAL := difftest_verilog
@@ -42,7 +67,8 @@ ifneq ($(CONFIG), )
 MILL_ARGS += --difftest-config $(CONFIG)
 endif
 difftest_verilog:
-	mill -i difftest.test.runMain difftest.DifftestMain --target-dir $(RTL_DIR) $(MILL_ARGS)
+	MILL_WORKSPACE_ROOT="$(NOOP_HOME)" BUILD_DIR="$(BUILD_DIR)" \
+		$(MILL) -i difftest.test.runMain difftest.DifftestMain --target-dir $(RTL_DIR) $(MILL_ARGS)
 
 TIMELOG = $(BUILD_DIR)/time.log
 TIME_CMD = time -avp -o $(TIMELOG)
@@ -60,8 +86,62 @@ SIM_CXXFLAGS += -DNOOP_HOME=\\\"$(NOOP_HOME)\\\"
 
 # generated-src
 GEN_CSRC_DIR  = $(BUILD_DIR)/generated-src
-SIM_CXXFILES += $(shell find $(GEN_CSRC_DIR) -name "*.cpp" 2> /dev/null)
+NOOP_GEN_CSRC_DIR = $(abspath $(NOOP_HOME)/build/generated-src)
+GEN_REQUIRED_FILES = difftest-dpic.cpp difftest-dpic.h difftest-query.h difftest-state.h DifftestMacros.svh
+GEN_REQUIRED_PATHS = $(addprefix $(GEN_CSRC_DIR)/,$(GEN_REQUIRED_FILES))
+GEN_CSRC_DPIC = $(GEN_CSRC_DIR)/difftest-dpic.cpp
+GEN_CSRC_CPP = $(shell find $(GEN_CSRC_DIR) -name "*.cpp" 2> /dev/null)
+SIM_CXXFILES += $(GEN_CSRC_DPIC) $(filter-out $(GEN_CSRC_DPIC),$(GEN_CSRC_CPP))
 SIM_CXXFLAGS += -I$(GEN_CSRC_DIR)
+
+.PHONY: prepare-generated-src
+ifeq ($(NO_DIFF),1)
+prepare-generated-src:
+	@:
+else
+prepare-generated-src:
+	@set -e; \
+	need_gen=0; \
+	tmp_gen_dir="$(BUILD_DIR)/.difftest_gen"; \
+	for f in $(GEN_REQUIRED_FILES); do \
+		if [ ! -f "$(GEN_CSRC_DIR)/$$f" ]; then \
+			need_gen=1; \
+			break; \
+		fi; \
+	done; \
+	if [ "$$need_gen" = "1" ]; then \
+		$(MAKE) BUILD_DIR="$$tmp_gen_dir" difftest_verilog NUM_CORES=$(NUM_CORES) CONFIG="$(CONFIG)" RTL_SUFFIX=$(RTL_SUFFIX); \
+		for f in $(GEN_REQUIRED_FILES); do \
+			if [ -f "$$tmp_gen_dir/generated-src/$$f" ]; then \
+				mkdir -p "$(GEN_CSRC_DIR)"; \
+				cp -f "$$tmp_gen_dir/generated-src/$$f" "$(GEN_CSRC_DIR)/$$f"; \
+			fi; \
+		done; \
+	fi; \
+	mkdir -p "$(GEN_CSRC_DIR)"; \
+	missing=0; \
+	for f in $(GEN_REQUIRED_FILES); do \
+		if [ ! -f "$(GEN_CSRC_DIR)/$$f" ]; then \
+			missing=1; \
+			break; \
+		fi; \
+	done; \
+	if [ "$$missing" = "1" ] && [ "$(abspath $(GEN_CSRC_DIR))" != "$(abspath $(NOOP_GEN_CSRC_DIR))" ]; then \
+		for f in $(GEN_REQUIRED_FILES); do \
+			if [ -f "$(NOOP_GEN_CSRC_DIR)/$$f" ]; then \
+				cp -f "$(NOOP_GEN_CSRC_DIR)/$$f" "$(GEN_CSRC_DIR)/$$f"; \
+			fi; \
+		done; \
+	fi; \
+	for f in $(GEN_REQUIRED_FILES); do \
+		test -f "$(GEN_CSRC_DIR)/$$f"; \
+	done
+endif
+
+ifneq ($(NO_DIFF),1)
+$(GEN_REQUIRED_PATHS): prepare-generated-src
+	@test -f "$@"
+endif
 
 PLUGIN_CSRC_DIR = $(abspath ./src/test/csrc/plugin)
 PLUGIN_INC_DIR  = $(abspath $(PLUGIN_CSRC_DIR)/include)
@@ -322,7 +402,7 @@ clean: vcs-clean pldm-clean fpga-clean
 format: scala-format clang-format
 
 scala-format:
-	mill -i mill.scalalib.scalafmt.ScalafmtModule/reformatAll __.sources
+	$(MILL) -i mill.scalalib.scalafmt.ScalafmtModule/reformatAll __.sources
 
 CLANG_FORMAT_VER = 18.1.4
 clang-format:

@@ -17,6 +17,8 @@
 
 VERILATOR_BUILD_DIR = $(BUILD_DIR)/verilator-compile
 VERILATOR_TARGET = $(VERILATOR_BUILD_DIR)/$(EMU_ELF_NAME)
+VERILATOR_PREFIX ?= V$(EMU_TOP)
+VERILATOR_PCH_BASENAME = $(VERILATOR_PREFIX)__pch.h
 
 ########## Verilator Configuration Options ##########
 VERILATOR_FLAGS = $(SIM_VFLAGS)
@@ -25,6 +27,11 @@ VERILATOR_CSRC_DIR = $(abspath ./src/test/csrc/verilator)
 VERILATOR_CXXFILES = $(EMU_CXXFILES) $(shell find $(VERILATOR_CSRC_DIR) -name "*.cpp")
 VERILATOR_CXXFLAGS = $(EMU_CXXFLAGS) -I$(VERILATOR_CSRC_DIR) -DVERILATOR --std=c++17
 VERILATOR_LDFLAGS  = $(SIM_LDFLAGS) -ldl
+
+# Optional compile parallelism for the inner Verilator make.
+# - Empty: inherit parent make jobserver/default behavior.
+# - Set (e.g. EMU_BUILD_JOBS=50): force sub-make to use that -j value.
+VERILATOR_MAKE_JOBS = $(if $(strip $(EMU_BUILD_JOBS)),-j$(EMU_BUILD_JOBS),)
 
 # Verilator binary
 VERILATOR ?= verilator
@@ -78,7 +85,7 @@ OPT_FAST ?= -O3
 ########## Verilator Build Recipes ##########
 VERILATOR_FLAGS_ALL =               \
   --exe $(EMU_OPTIMIZE)             \
-  --cc --top-module $(EMU_TOP)      \
+  --cc --top-module $(VERILATOR_TOP) --prefix $(VERILATOR_PREFIX) \
   +define+VERILATOR=1               \
   +define+PRINTF_COND=1             \
   +define+RANDOMIZE_REG_INIT        \
@@ -99,27 +106,31 @@ VERILATOR_FLAGS_ALL =               \
   -o $(VERILATOR_TARGET)            \
   $(VERILATOR_FLAGS)
 
-VERILATOR_MK = $(VERILATOR_BUILD_DIR)/V$(EMU_TOP).mk
+VERILATOR_MK = $(VERILATOR_BUILD_DIR)/$(VERILATOR_PREFIX).mk
 VERILATOR_HEADERS := $(EMU_HEADERS) $(shell find $(VERILATOR_CSRC_DIR) -name "*.h")
 
 # Profile Guided Optimization
 VERILATOR_PGO_DIR  = $(VERILATOR_BUILD_DIR)/pgo
 PGO_MAX_CYCLE ?= 2000000
 
-$(VERILATOR_MK): $(SIM_TOP_V) | $(SIM_VSRC) $(VERILATOR_CXXFILES)
+$(VERILATOR_MK): $(SIM_TOP_V) $(if $(filter 1,$(NO_DIFF)),,$(GEN_REQUIRED_PATHS)) $(SIM_VSRC) $(VERILATOR_CXXFILES)
 ifeq ($(EMU_COVERAGE),1)
 	@python3 ./scripts/coverage/vtransform.py $(RTL_DIR)
 endif
 	@mkdir -p $(@D)
 	@echo -e "\n[verilator] Generating C++ files..." >> $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) $(VERILATOR) $(VERILATOR_FLAGS_ALL) --Mdir $(@D) $^ $(SIM_VSRC) $(VERILATOR_CXXFILES)
+	$(TIME_CMD) $(VERILATOR) $(VERILATOR_FLAGS_ALL) --Mdir $(@D) $(SIM_TOP_V) $(SIM_VSRC) $(VERILATOR_CXXFILES)
 	@sed -i -e 's/$(subst /,\/,$(NOOP_HOME))/$$(NOOP_HOME)/g' \
 	       -e '/^default:/i\NOOP_HOME ?= $(subst /,\/,$(NOOP_HOME))\n' $@
+	@# Provide fallback headers for -include $(VERILATOR_PCH_BASENAME).{fast,slow}.
+	@# If a .gch gets invalidated, GCC falls back to these headers.
+	@ln -sf $(VERILATOR_PCH_BASENAME) $(@D)/$(VERILATOR_PCH_BASENAME).fast
+	@ln -sf $(VERILATOR_PCH_BASENAME) $(@D)/$(VERILATOR_PCH_BASENAME).slow
 ifneq ($(VERILATOR_5_000),1)
-	@sed -i 's/private/public/g' $(VERILATOR_BUILD_DIR)/VSimTop.h
-	@sed -i 's/const vlSymsp/vlSymsp/g' $(VERILATOR_BUILD_DIR)/VSimTop.h
-	@sed -i 's/VlThreadPool\* const/VlThreadPool*/g' $(VERILATOR_BUILD_DIR)/VSimTop__Syms.h
+	@sed -i 's/private/public/g' $(VERILATOR_BUILD_DIR)/$(VERILATOR_PREFIX).h
+	@sed -i 's/const vlSymsp/vlSymsp/g' $(VERILATOR_BUILD_DIR)/$(VERILATOR_PREFIX).h
+	@sed -i 's/VlThreadPool\* const/VlThreadPool*/g' $(VERILATOR_BUILD_DIR)/$(VERILATOR_PREFIX)__Syms.h
 endif
 
 EMU_COMPILE_FILTER =
@@ -128,7 +139,7 @@ EMU_COMPILE_FILTER =
 verilator-build-emu:
 ifeq ($(REMOTE),localhost)
 	@sync -d $(BUILD_DIR) -d $(VERILATOR_BUILD_DIR)
-	$(TIME_CMD) $(MAKE) -s VM_PARALLEL_BUILDS=1 OPT_SLOW="-O0" \
+	$(TIME_CMD) $(MAKE) $(VERILATOR_MAKE_JOBS) -s VM_PARALLEL_BUILDS=1 OPT_SLOW="-O0" \
 						OPT_FAST=$(OPT_FAST) \
 						PGO_CFLAGS="$(PGO_CFLAGS)" \
 						PGO_LDFLAGS="$(PGO_LDFLAGS)" \
@@ -137,7 +148,7 @@ ifeq ($(REMOTE),localhost)
 else
 	ssh -tt $(REMOTE) 'export NOOP_HOME=$(NOOP_HOME); \
 					   $(MAKE) -C $(NOOP_HOME)/difftest verilator-build-emu \
-					   -j `nproc` \
+					   $(if $(strip $(EMU_BUILD_JOBS)),-j $(EMU_BUILD_JOBS),-j `nproc`) \
 					   OPT_FAST="'"$(OPT_FAST)"'" \
 					   PGO_CFLAGS="'"$(PGO_CFLAGS)"'" \
 					   PGO_LDFLAGS="'"$(PGO_LDFLAGS)"'"'
@@ -234,6 +245,7 @@ coverage:
 	@mv $(COVERAGE_DATA) $(COVERAGE_DIR)
 
 verilator-clean-obj:
-	rm -f $(VERILATOR_BUILD_DIR)/*.o $(VERILATOR_BUILD_DIR)/*.gch $(VERILATOR_BUILD_DIR)/*.a $(VERILATOR_TARGET)
+	rm -f $(VERILATOR_BUILD_DIR)/*.o $(VERILATOR_BUILD_DIR)/*.gch $(VERILATOR_BUILD_DIR)/*.a \
+	      $(VERILATOR_TARGET) $(VERILATOR_MK) $(VERILATOR_BUILD_DIR)/V$(EMU_TOP)_classes.mk
 
 .PHONY: verilator-build-emu verilator-clean-obj

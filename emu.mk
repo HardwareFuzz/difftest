@@ -22,6 +22,7 @@ endif
 
 EMU          = $(BUILD_DIR)/$(EMU_ELF_NAME)
 EMU_TOP      = SimTop
+VERILATOR_TOP ?= $(SIM_TOP)
 
 EMU_CSRC_DIR   = $(abspath ./src/test/csrc/emu)
 EMU_CONFIG_DIR = $(abspath ./config)
@@ -75,7 +76,7 @@ include gsim.mk
 
 ########## Emu build recipes ##########
 
-emu-verilator: verilator-emu
+emu-verilator: prepare-generated-src verilator-emu
 	@ln -sf $(VERILATOR_TARGET) $(EMU)
 
 emu-gsim: gsim-emu
@@ -89,6 +90,6 @@ else
 	@$(MAKE) emu-verilator
 endif
 
-emu-mk: verilator-emu-mk
+emu-mk: prepare-generated-src verilator-emu-mk
 
 clean-obj: verilator-clean-obj gsim-clean-obj
