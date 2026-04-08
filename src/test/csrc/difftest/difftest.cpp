@@ -475,7 +475,12 @@ inline int Difftest::check_all() {
     dut->commit[0].valid = 0;
   } else {
 #if !defined(BASIC_DIFFTEST_ONLY) && !defined(CONFIG_DIFFTEST_SQUASH)
-    if (dut->commit[0].valid) {
+    // Before the first instruction at FIRST_INST_ADDRESS commits, the per-core
+    // reference proxy has not been initialized yet. Boot/ROM commits before
+    // that point must not participate in the batch-PC check, otherwise
+    // multicore runs can latch a permanent false pc_mismatch on secondary
+    // harts before difftest is actually enabled for them.
+    if (state->has_commit && dut->commit[0].valid) {
       dut_commit_batch_pc = dut->commit[0].pc;
       ref_commit_batch_pc = proxy->state.pc;
       if (dut_commit_batch_pc != ref_commit_batch_pc) {

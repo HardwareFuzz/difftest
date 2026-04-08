@@ -64,6 +64,10 @@ public:
 
   virtual int do_step() = 0;
 
+  virtual bool allow_before_first_commit() const {
+    return false;
+  }
+
   static const int STATE_OK = 0;
   static const int STATE_DIFF = 1;
   static const int STATE_ERROR = 2;
@@ -81,6 +85,9 @@ public:
   virtual ~SimpleChecker() = default;
 
   virtual int do_step() override {
+    if (!state->has_commit && !allow_before_first_commit()) {
+      return 0;
+    }
     if (get_valid()) {
       int ret = check();
       clear_valid();
@@ -107,6 +114,9 @@ public:
   virtual ~ProbeChecker() = default;
 
   virtual int do_step() override {
+    if (!state->has_commit && !allow_before_first_commit()) {
+      return 0;
+    }
     Probe &probe = get_probe();
     if (get_valid(probe)) {
       int ret = check(probe);
@@ -146,6 +156,10 @@ class FirstInstrCommitChecker : public ProbeChecker<DifftestInstrCommit> {
 public:
   FirstInstrCommitChecker(GetProbeFn get_probe, DiffState *state, RefProxy *proxy, GetRegsFn get_regs)
       : ProbeChecker<DifftestInstrCommit>(get_probe, state, proxy), get_regs(std::move(get_regs)) {}
+
+  bool allow_before_first_commit() const override {
+    return true;
+  }
 
 private:
   GetRegsFn get_regs;
@@ -187,6 +201,10 @@ public:
 
   TimeoutChecker(GetProbeFn get_probe, DiffState *state, RefProxy *proxy)
       : ProbeChecker<DifftestTrapEvent>(get_probe, state, proxy) {}
+
+  bool allow_before_first_commit() const override {
+    return true;
+  }
 
 private:
   int check(const DifftestTrapEvent &probe) override;

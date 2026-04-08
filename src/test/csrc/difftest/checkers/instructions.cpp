@@ -20,7 +20,7 @@
 #include "ram.h"
 
 bool FirstInstrCommitChecker::get_valid(const DifftestInstrCommit &probe) {
-  return !state->has_commit && probe.valid;
+  return !state->has_commit && probe.valid && probe.pc >= FIRST_INST_ADDRESS;
 }
 
 void FirstInstrCommitChecker::clear_valid(DifftestInstrCommit &probe) {
@@ -36,7 +36,7 @@ int FirstInstrCommitChecker::check(const DifftestInstrCommit &probe) {
         proxy->mem_init(dest_addr, src, n, DUT_TO_REF);
       },
       true);
-  proxy->regcpy(&get_regs(), FIRST_INST_ADDRESS);
+  proxy->regcpy(&get_regs(), probe.pc);
   // Do not reconfig simulator 'proxy->update_config(&nemu_config)' here:
   // If this is main sim thread, simulator has its own initial config
   // If this process is checkpoint wakeuped, simulator's config has already been updated,

@@ -128,6 +128,11 @@ Emulator::Emulator(int argc, const char *argv[])
     }
   }
 
+#ifndef CONFIG_NO_DIFFTEST
+  // Standalone emulator flows should start difftest from DRAM user code, not the bootrom.
+  FIRST_INST_ADDRESS = PMEM_BASE;
+#endif
+
   if (args.gcpt_restore) {
     if (args.overwrite_nbytes_autoset) {
       FILE *fp = fopen(args.gcpt_restore, "rb");

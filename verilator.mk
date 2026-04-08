@@ -32,6 +32,9 @@ VERILATOR_LDFLAGS  = $(SIM_LDFLAGS) -ldl
 # - Empty: inherit parent make jobserver/default behavior.
 # - Set (e.g. EMU_BUILD_JOBS=50): force sub-make to use that -j value.
 VERILATOR_MAKE_JOBS = $(if $(strip $(EMU_BUILD_JOBS)),-j$(EMU_BUILD_JOBS),)
+# Optional parallelism for the Verilator frontend itself.
+# Reuse EMU_BUILD_JOBS so the slow C++ generation phase does not stay single-threaded.
+VERILATOR_FRONTEND_JOBS = $(if $(strip $(EMU_BUILD_JOBS)),-j $(EMU_BUILD_JOBS),)
 
 # Verilator binary
 VERILATOR ?= verilator
@@ -120,7 +123,7 @@ endif
 	@mkdir -p $(@D)
 	@echo -e "\n[verilator] Generating C++ files..." >> $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) $(VERILATOR) $(VERILATOR_FLAGS_ALL) --Mdir $(@D) $(SIM_TOP_V) $(SIM_VSRC) $(VERILATOR_CXXFILES)
+	$(TIME_CMD) $(VERILATOR) $(VERILATOR_FRONTEND_JOBS) $(VERILATOR_FLAGS_ALL) --Mdir $(@D) $(SIM_TOP_V) $(SIM_VSRC) $(VERILATOR_CXXFILES)
 	@sed -i -e 's/$(subst /,\/,$(NOOP_HOME))/$$(NOOP_HOME)/g' \
 	       -e '/^default:/i\NOOP_HOME ?= $(subst /,\/,$(NOOP_HOME))\n' $@
 	@# Provide fallback headers for -include $(VERILATOR_PCH_BASENAME).{fast,slow}.

@@ -46,7 +46,12 @@ extern uint64_t FIRST_INST_ADDRESS;
 // first valid instruction's address, difftest starts from this instruction
 #if defined(CPU_NUTSHELL)
 #define _FIRST_INST_ADDRESS 0x80000000UL
-#elif defined(CPU_XIANGSHAN) || defined(CPU_ROCKET_CHIP)
+#elif defined(CPU_XIANGSHAN)
+// For standalone ELF-driven XiangShan fuzz runs, difftest must start from DRAM user code.
+// Starting from the boot ROM (0x1000_0000) lets the DUT execute setup code that the reference
+// model does not mirror in our plugin flow, which breaks 2-core completion and trace collection.
+#define _FIRST_INST_ADDRESS _PMEM_BASE
+#elif defined(CPU_ROCKET_CHIP)
 #define _FIRST_INST_ADDRESS 0x10000000UL
 #endif
 
