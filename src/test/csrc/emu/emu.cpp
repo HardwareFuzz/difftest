@@ -64,6 +64,13 @@ Emulator::Emulator(int argc, const char *argv[])
 #endif // VERILATOR
 
   args = parse_args(argc, argv);
+#ifndef CONFIG_NO_DIFFTEST
+  // cx-riscv-cores standalone fuzzing uses an external harness for differential
+  // validation. Keep XiangShan's internal REF checking disabled even when callers
+  // pass --diff, while preserving the commit/trap plumbing used for GOODTRAP and
+  // commit-trace driven analysis.
+  args.enable_diff = false;
+#endif // CONFIG_NO_DIFFTEST
 #ifdef VERILATOR
   Verilated::commandArgs(argc, argv); // Prepare extra args for TLMonitor
 #endif
