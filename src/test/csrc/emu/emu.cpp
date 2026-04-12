@@ -65,11 +65,21 @@ Emulator::Emulator(int argc, const char *argv[])
 
   args = parse_args(argc, argv);
 #ifndef CONFIG_NO_DIFFTEST
-  // cx-riscv-cores standalone fuzzing uses an external harness for differential
-  // validation. Keep XiangShan's internal REF checking disabled even when callers
-  // pass --diff, while preserving the commit/trap plumbing used for GOODTRAP and
-  // commit-trace driven analysis.
-  args.enable_diff = false;
+  // Standalone cx-riscv-cores flows usually use an external harness for the final
+  // comparison step, so keep XiangShan's internal difftest disabled by default.
+  //
+  // Some callers still need the internal difftest pipeline alive because the
+  // per-instruction commit trace is produced there rather than from the coarse
+  // ROB retire prints. Require an explicit opt-in so the behavior is visible and
+  // reproducible instead of silently changing across environments.
+  const char *keep_internal_diff_env =
+      getenv("CX_RISCV_CORES_XIANGSHAN_ENABLE_INTERNAL_DIFF");
+  const bool keep_internal_diff = keep_internal_diff_env != nullptr &&
+                                  keep_internal_diff_env[0] != '\0' &&
+                                  strcmp(keep_internal_diff_env, "0") != 0;
+  if (!keep_internal_diff) {
+    args.enable_diff = false;
+  }
 #endif // CONFIG_NO_DIFFTEST
 #ifdef VERILATOR
   Verilated::commandArgs(argc, argv); // Prepare extra args for TLMonitor

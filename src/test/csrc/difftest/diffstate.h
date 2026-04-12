@@ -60,15 +60,15 @@ public:
 
 protected:
   void display_custom() {
-    Info(" wen %d dst %02d data %016lx idx %03x", wen, dest, data, robidx);
+    eprintf(" wen %d dst %02d data %016lx idx %03x", wen, dest, data, robidx);
     if (isLoad) {
-      Info(" (%02x)", lqidx);
+      eprintf(" (%02x)", lqidx);
     }
     if (isStore) {
-      Info(" (%02x)", sqidx);
+      eprintf(" (%02x)", sqidx);
     }
     if (tag) {
-      Info(" (%c)", tag);
+      eprintf(" (%c)", tag);
     }
   }
 
@@ -93,7 +93,7 @@ public:
 
 protected:
   void display_custom() {
-    Info(" cause %016lx", cause);
+    eprintf(" cause %016lx", cause);
   }
 };
 
