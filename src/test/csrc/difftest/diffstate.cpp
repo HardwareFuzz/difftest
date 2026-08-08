@@ -18,17 +18,17 @@
 #include "spikedasm.h"
 
 void CommitTrace::display(bool use_spike) {
-  Info("%s pc %016lx inst %08x", get_type(), pc, inst);
+  eprintf("%s pc %016lx inst %08x", get_type(), pc, inst);
   display_custom();
   if (use_spike) {
-    Info(" %s", spike_dasm(inst));
+    eprintf(" %s", spike_dasm(inst));
   }
 }
 
 void CommitTrace::display_line(int index, bool use_spike, bool is_retire) {
-  Info("[%02d] ", index);
+  eprintf("[%02d] ", index);
   display(use_spike);
-  Info("%s\n", is_retire ? " <--" : "");
+  eprintf("%s\n", is_retire ? " <--" : "");
 }
 
 void DiffState::display() {
