@@ -16,7 +16,7 @@ jobs:
     container: ghcr.io/openxiangshan/xs-env:ubuntu-20.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Enable -Werror for EMU Build
         run: |
@@ -36,7 +36,7 @@ jobs:
         run: |
             curl -s https://api.github.com/repos/OpenXiangShan/circt/releases/latest \
               | grep "browser_download_url"                                          \
-              | grep "firtool-1.135.0-ubuntu-20.04"                                  \
+              | grep "firtool-1.149.0-ubuntu-20.04"                                  \
               | cut -d '"' -f 4                                                      \
               | xargs wget -O firtool
             chmod +x ./firtool
@@ -86,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/openxiangshan/xs-env:${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Prepare XiangShan
         run: |
@@ -105,7 +105,7 @@ jobs:
           mv $NOOP_HOME/build/libdifftest.so $GITHUB_WORKSPACE/libdifftest.so
 
       - name: Release libdifftest.so to artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: libdifftest-${{ matrix.os }}-xiangshan.so
           path: libdifftest.so

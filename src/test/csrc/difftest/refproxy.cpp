@@ -166,6 +166,9 @@ void RefProxy::regcpy(const DiffTestRegState *regs, uint64_t pc) {
 #ifdef CONFIG_DIFFTEST_FPCSRSTATE
   memcpy(&state.fcsr, &regs->fcsr, sizeof(state.fcsr));
 #endif // CONFIG_DIFFTEST_FPCSRSTATE
+#ifdef CONFIG_DIFFTEST_MATRIXCSRSTATE
+  memcpy(&state.mcsr, &regs->mcsr, sizeof(state.mcsr));
+#endif // CONFIG_DIFFTEST_MATRIXCSRSTATE
 #ifdef CONFIG_DIFFTEST_TRIGGERCSRSTATE
   memcpy(&state.triggercsr, &regs->triggercsr, sizeof(state.triggercsr));
 #endif //CONFIG_DIFFTEST_TRIGGERCSRSTATE
@@ -191,6 +194,9 @@ int RefProxy::compare(DiffTestState *dut) {
 #ifdef CONFIG_DIFFTEST_HCSRSTATE
                          PROXY_COMPARE(hcsr),
 #endif // CONFIG_DIFFTEST_HCSRSTATE
+#ifdef CONFIG_DIFFTEST_MATRIXCSRSTATE
+                         PROXY_COMPARE(mcsr),
+#endif // CONFIG_DIFFTEST_MATRIXCSRSTATE
 #ifdef CONFIG_DIFFTEST_TRIGGERCSRSTATE
                          PROXY_COMPARE(triggercsr),
 #endif // CONFIG_DIFFTEST_TRIGGERCSRSTATE
@@ -215,15 +221,17 @@ int RefProxy::compare(DiffTestState *dut) {
 
 void RefProxy::display(DiffTestState *dut) {
   if (dut) {
-#define PROXY_COMPARE_AND_DISPLAY(field, field_names)                                   \
-  do {                                                                                  \
-    uint64_t *_ptr_dut = (uint64_t *)(&((dut)->regs.field));                            \
-    uint64_t *_ptr_ref = (uint64_t *)(&(state.field));                                  \
-    for (int i = 0; i < sizeof(state.field) / sizeof(uint64_t); i++) {                  \
-      if (_ptr_dut[i] != _ptr_ref[i]) {                                                 \
-        REPORT_DIFFERENCE(field_names[i], dut->commit[0].pc, _ptr_ref[i], _ptr_dut[i]); \
-      }                                                                                 \
-    }                                                                                   \
+    const uint64_t diff_pc = (dut->commit[0].valid ? dut->commit[0].pc : dut->trap.pc);
+#define PROXY_COMPARE_AND_DISPLAY(field, field_names)                                                   \
+  do {                                                                                                  \
+    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Waddress-of-packed-member\"")     \
+        uint64_t *_ptr_dut = (uint64_t *)(&((dut)->regs.field));                                        \
+    uint64_t *_ptr_ref = (uint64_t *)(&(state.field));                                                  \
+    _Pragma("GCC diagnostic pop") for (size_t i = 0; i < sizeof(state.field) / sizeof(uint64_t); i++) { \
+      if (_ptr_dut[i] != _ptr_ref[i]) {                                                                 \
+        REPORT_DIFFERENCE(field_names[i], diff_pc, _ptr_ref[i], _ptr_dut[i]);                           \
+      }                                                                                                 \
+    }                                                                                                   \
   } while (0);
 
     PROXY_COMPARE_AND_DISPLAY(xrf, regs_name_int)
@@ -243,6 +251,9 @@ void RefProxy::display(DiffTestState *dut) {
 #ifdef CONFIG_DIFFTEST_FPCSRSTATE
     PROXY_COMPARE_AND_DISPLAY(fcsr, regs_name_fp_csr)
 #endif // CONFIG_DIFFTEST_FPCSRSTATE
+#ifdef CONFIG_DIFFTEST_MATRIXCSRSTATE
+    PROXY_COMPARE_AND_DISPLAY(mcsr, regs_name_matrix_csr)
+#endif // CONFIG_DIFFTEST_MATRIXCSRSTATE
 #ifdef CONFIG_DIFFTEST_TRIGGERCSRSTATE
     PROXY_COMPARE_AND_DISPLAY(triggercsr, regs_name_triggercsr)
 #endif // CONFIG_DIFFTEST_TRIGGERCSRSTATE

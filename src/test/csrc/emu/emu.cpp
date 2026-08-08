@@ -86,8 +86,8 @@ Emulator::Emulator(int argc, const char *argv[])
 #endif
 
 #ifdef ENABLE_CONSTANTIN
-  void constantinLoad();
-  constantinLoad();
+  void constantinLoad(const char *cst_file);
+  constantinLoad(args.cst_file);
 #endif // CONSTANTIN
 #ifdef VERILATOR
   // srand
@@ -136,9 +136,9 @@ Emulator::Emulator(int argc, const char *argv[])
   // normal linear memory
   else {
     if (args.footprints_name) {
-      simMemory = new MmapMemoryWithFootprints(args.image, ram_size, args.footprints_name);
+      simMemory = new MmapMemoryWithFootprints(args.image, ram_size, args.footprints_name, args.random_mem, args.seed);
     } else {
-      init_ram(args.image, ram_size);
+      init_ram(args.image, ram_size, args.random_mem, args.seed);
 #ifdef WITH_DRAMSIM3
       dramsim3_init(args.dramsim3_ini, args.dramsim3_outdir);
 #endif
@@ -154,7 +154,10 @@ Emulator::Emulator(int argc, const char *argv[])
     if (args.overwrite_nbytes_autoset) {
       FILE *fp = fopen(args.gcpt_restore, "rb");
       fseek(fp, 4, SEEK_SET);
-      fread(&args.overwrite_nbytes, sizeof(uint32_t), 1, fp);
+      if (fread(&args.overwrite_nbytes, sizeof(uint32_t), 1, fp) != 1) {
+        printf("Failed to read overwrite_nbytes from gcpt_restore file %s\n", args.gcpt_restore);
+        assert(0);
+      }
       fclose(fp);
     }
     overwrite_ram(args.gcpt_restore, args.overwrite_nbytes);
@@ -291,7 +294,7 @@ Emulator::~Emulator() {
 
 #ifdef ENABLE_CHISEL_DB
   if (args.dump_db) {
-    save_db(logdb_filename());
+    save_db(db_filename());
   }
 #endif
 
@@ -597,7 +600,7 @@ int Emulator::tick() {
 #ifdef DEBUG_TILELINK
   if (args.dump_tl_interval != 0) {
     if ((cycles != 0) && (cycles % args.dump_tl_interval == 0)) {
-      checkpoint_db(logdb_filename());
+      checkpoint_db(db_filename());
     }
   }
 #endif
@@ -613,11 +616,22 @@ int Emulator::tick() {
     if (((timer - lasttime_snapshot > args.fork_interval) || !have_initial_fork) && !is_fork_child()) {
       have_initial_fork = true;
       lasttime_snapshot = timer;
+#if !defined(CONFIG_NO_DIFFTEST) && defined(CONFIG_DIFFTEST_AMUCTRLEVENT)
+      difftest_mma_flush_all();
+      difftest_mma_stop_all();
+#endif // !CONFIG_NO_DIFFTEST && CONFIG_DIFFTEST_AMUCTRLEVENT
       switch (lightsss->do_fork()) {
-        case FORK_ERROR: return -1;
+        case FORK_ERROR:
+#if !defined(CONFIG_NO_DIFFTEST) && defined(CONFIG_DIFFTEST_AMUCTRLEVENT)
+          difftest_mma_start_all();
+#endif // !CONFIG_NO_DIFFTEST && CONFIG_DIFFTEST_AMUCTRLEVENT
+          return -1;
         case FORK_CHILD: fork_child_init();
         default: break;
       }
+#if !defined(CONFIG_NO_DIFFTEST) && defined(CONFIG_DIFFTEST_AMUCTRLEVENT)
+      difftest_mma_start_all();
+#endif // !CONFIG_NO_DIFFTEST && CONFIG_DIFFTEST_AMUCTRLEVENT
     }
   }
   return 0;

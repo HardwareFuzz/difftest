@@ -139,9 +139,9 @@ endif
 EMU_COMPILE_FILTER =
 # 2> $(BUILD_DIR)/g++.err.log | tee $(BUILD_DIR)/g++.out.log | grep 'g++' | awk '{print "Compiling/Generating", $$NF}'
 
-verilator-build-emu:
+verilator-build-emu: $(SIM_EXTRA_OBJS)
 ifeq ($(REMOTE),localhost)
-	@sync -d $(BUILD_DIR) -d $(VERILATOR_BUILD_DIR)
+	@sync -d $(BUILD_DIR) $(VERILATOR_BUILD_DIR)
 	$(TIME_CMD) $(MAKE) $(VERILATOR_MAKE_JOBS) -s VM_PARALLEL_BUILDS=1 OPT_SLOW="-O0" \
 						OPT_FAST=$(OPT_FAST) \
 						PGO_CFLAGS="$(PGO_CFLAGS)" \
@@ -154,10 +154,11 @@ else
 					   $(if $(strip $(EMU_BUILD_JOBS)),-j $(EMU_BUILD_JOBS),-j `nproc`) \
 					   OPT_FAST="'"$(OPT_FAST)"'" \
 					   PGO_CFLAGS="'"$(PGO_CFLAGS)"'" \
-					   PGO_LDFLAGS="'"$(PGO_LDFLAGS)"'"'
+					   PGO_LDFLAGS="'"$(PGO_LDFLAGS)"'" \
+					   OBJCACHE="'"$(OBJCACHE)"'"'
 endif
 
-$(VERILATOR_TARGET): $(VERILATOR_MK) $(SIM_VSRC) $(VERILATOR_CXXFILES) $(VERILATOR_HEADERS)
+$(VERILATOR_TARGET): $(VERILATOR_MK) $(SIM_VSRC) $(VERILATOR_CXXFILES) $(VERILATOR_HEADERS) $(SIM_EXTRA_OBJS)
 	@echo -e "\n[c++] Compiling C++ files..." >> $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
 ifdef PGO_WORKLOAD

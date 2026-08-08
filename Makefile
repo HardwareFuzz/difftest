@@ -83,6 +83,9 @@ SIM_CXXFILES = $(shell find $(SIM_CSRC_DIR) -name "*.cpp") $(shell find $(SIM_CO
 SIM_CXXFLAGS = -I$(SIM_CSRC_DIR) -I$(SIM_CONFIG_DIR)
 
 SIM_CXXFLAGS += -DNOOP_HOME=\\\"$(NOOP_HOME)\\\"
+ifeq ($(SPLITVIEW),1)
+SIM_CXXFLAGS += -DCONFIG_SPLITVIEW
+endif
 
 # generated-src
 GEN_CSRC_DIR  = $(BUILD_DIR)/generated-src
@@ -145,6 +148,7 @@ endif
 
 PLUGIN_CSRC_DIR = $(abspath ./src/test/csrc/plugin)
 PLUGIN_INC_DIR  = $(abspath $(PLUGIN_CSRC_DIR)/include)
+SIM_CXXFILES   += $(shell find $(PLUGIN_CSRC_DIR)/topdown -name "*.cpp" 2> /dev/null)
 SIM_CXXFLAGS   += -I$(PLUGIN_INC_DIR)
 
 GEN_VSRC_DIR = $(BUILD_DIR)/generated-src
@@ -171,12 +175,13 @@ else
 SIM_CXXFILES += $(DIFFTEST_CXXFILES)
 SIM_CXXFLAGS += -I$(DIFFTEST_CSRC_DIR)
 SIM_VFLAGS   += +define+DIFFTEST
+
 ifeq ($(DIFFTEST_PERFCNT), 1)
 SIM_CXXFLAGS += -DCONFIG_DIFFTEST_PERFCNT
 endif
 ifeq ($(DIFFTEST_CHECKER_PERF), 1)
 SIM_CXXFLAGS += -DCONFIG_DIFFTEST_CHECKER_PERF
-endif 
+endif
 ifeq ($(DIFFTEST_QUERY), 1)
 SIM_CXXFLAGS += -DCONFIG_DIFFTEST_QUERY
 SIM_LDFLAGS  += -lsqlite3
@@ -252,6 +257,7 @@ endif
 # ConstantIn
 WITH_CONSTANTIN ?= 1
 ifeq ($(WITH_CONSTANTIN), 1)
+SIM_CXXFILES += $(shell find $(PLUGIN_CSRC_DIR)/constantin -name "*.cpp")
 SIM_CXXFILES += $(BUILD_DIR)/constantin.cpp
 SIM_CXXFLAGS += -I$(BUILD_DIR) -DENABLE_CONSTANTIN
 endif
@@ -339,12 +345,11 @@ SIM_CXXFILES += $(shell find $(PLUGIN_CSRC_DIR)/runahead -name "*.cpp")
 endif
 
 # SimFrontend plugin
+SIMFRONTEND_CSRC_DIR = $(abspath $(PLUGIN_CSRC_DIR)/simfrontend)
 ifeq ($(ENABLE_SIMFRONTEND), 1)
-TRACE_CSR_DIR = $(abspath ./src/test/csrc/plugin/simfrontend)
-SIM_CXXFILES += $(shell find $(TRACE_CSR_DIR) -name "*.cpp")
-SIM_CXXFLAGS += -I$(TRACE_CSR_DIR) -DPLUGIN_SIMFRONTEND
+SIM_CXXFILES += $(shell find $(SIMFRONTEND_CSRC_DIR) -name "*.cpp")
+SIM_CXXFLAGS += -I$(SIMFRONTEND_CSRC_DIR) -DPLUGIN_SIMFRONTEND -DCPU_XIANGSHAN
 endif
-
 
 # Check if XFUZZ is set
 ifeq ($(XFUZZ), 1)
@@ -388,8 +393,11 @@ ifeq ($(CXX_NO_WARNING),1)
 SIM_CXXFLAGS += -Werror
 endif
 
+include pgo.mk
+include cuda.mk
 include emu.mk
 include vcs.mk
+include uvs.mk
 include galaxsim.mk
 include palladium.mk
 include libso.mk

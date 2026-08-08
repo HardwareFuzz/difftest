@@ -17,10 +17,16 @@
 #include "args.h"
 #include "ram.h"
 #include "remote_bitbang.h"
+#include "splitview.h"
 #include <getopt.h>
 #ifdef CONFIG_DIFFTEST_IOTRACE
 #include "difftest-iotrace.h"
 #endif // CONFIG_DIFFTEST_IOTRACE
+
+enum {
+  OPT_SPLITVIEW_LOG = 1000,
+  OPT_DB_PATH,
+};
 
 static inline long long int atoll_strict(const char *str, const char *arg) {
   if (strspn(str, " +-0123456789") != strlen(str)) {
@@ -63,12 +69,14 @@ static inline void print_help(const char *file) {
   printf("      --dump-commit-trace    dump commit trace when log is enabled\n");
 #ifdef ENABLE_CHISEL_DB
   printf("      --dump-db              enable database dump\n");
+  printf("      --db-path=FILE         dump database to FILE\n");
   printf("      --dump-select-db       select database's table to dump\n");
 #endif
   printf("  -F, --flash                the flash bin file for simulation\n");
   printf("      --sim-run-ahead        let a fork of simulator run ahead of commit for perf analysis\n");
   printf("      --wave-path=FILE       dump waveform to a specified PATH\n");
   printf("      --ram-size=SIZE        simulation memory size, for example 8GB / 128MB\n");
+  printf("      --cst-file=FILE        load constantin from FILE, stdin, or default init values\n");
   printf("      --enable-fork          enable folking child processes to debug\n");
   printf("      --no-diff              disable differential testing\n");
   printf("      --diff=PATH            set the path of REF for differential testing\n");
@@ -88,6 +96,8 @@ static inline void print_help(const char *file) {
   printf("      --as-footprints        load the image as memory access footprints\n");
   printf("      --dump-linearized=NAME dump the linearized footprints to NAME\n");
   printf("      --copy-ram=OFFSET      duplicate the memory at OFFSET\n");
+  printf("      --splitview-log=PATH   write splitview uart.log, host.log, and all.log under PATH\n");
+  printf("      --random-mem           initialize memory from --seed\n");
   printf("  -h, --help                 print program help info\n");
   printf("\n");
 }
@@ -131,6 +141,10 @@ CommonArgs parse_args(int argc, const char *argv[]) {
     { "overwrite-auto",    1, NULL,  0  },
     { "instr-trace",       1, NULL,  0  },
     { "copy-ram",          1, NULL,  0  },
+    { "cst-file",          1, NULL,  0  },
+    { "random-mem",        0, NULL,  0  },
+    { "splitview-log",     1, NULL, OPT_SPLITVIEW_LOG },
+    { "db-path",           1, NULL, OPT_DB_PATH },
     { "seed",              1, NULL, 's' },
     { "max-cycles",        1, NULL, 'C' },
     { "fork-interval",     1, NULL, 'X' },
@@ -241,9 +255,22 @@ CommonArgs parse_args(int argc, const char *argv[]) {
           case 27: args.overwrite_nbytes_autoset = true; continue;
           case 28: args.instr_trace = optarg; continue;
           case 29: args.copy_ram_offset = parse_ramsize(optarg); continue;
+          case 30: args.cst_file = optarg; continue;
+          case 31: args.random_mem = true; continue;
         }
         // fall through
       default: print_help(argv[0]); exit(0);
+      case OPT_SPLITVIEW_LOG:
+        args.splitview_log_path = optarg;
+        common_splitview_set_log_path(args.splitview_log_path);
+        continue;
+      case OPT_DB_PATH:
+#ifdef ENABLE_CHISEL_DB
+        args.db_path = optarg;
+#else
+        printf("[WARN] chisel db is not enabled at compile time, ignore --db-path\n");
+#endif
+        continue;
       case 's':
         if (std::string(optarg) != "NO_SEED") {
           args.seed = atoll_strict(optarg, "seed");
