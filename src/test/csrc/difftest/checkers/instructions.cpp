@@ -23,6 +23,21 @@ bool FirstInstrCommitChecker::get_valid(const DifftestInstrCommit &probe) {
   return !state->has_commit && probe.valid && probe.pc >= FIRST_INST_ADDRESS;
 }
 
+static inline uint64_t get_other_commit_int_data(const DiffTestState *state, const DifftestInstrCommit &probe,
+                                                 int slot) {
+#ifdef CONFIG_DIFFTEST_PHYINTREGSTATE
+  return state->pregs_xrf.value[probe.otherwpdest[slot]];
+#else
+  return state->regs.xrf.value[probe.wdest + slot + 1];
+#endif
+}
+
+static inline bool is_scalar_amocas_q(uint64_t instr) {
+  constexpr uint64_t kMask = 0xf800707fULL;
+  constexpr uint64_t kMatch = 0x2800402fULL;
+  return (instr & kMask) == kMatch;
+}
+
 void FirstInstrCommitChecker::clear_valid(DifftestInstrCommit &probe) {
   state->has_commit = true;
 }
@@ -109,9 +124,16 @@ int InstrCommitChecker::check(const DifftestInstrCommit &probe) {
 #endif
   uint64_t commit_instr = probe.instr;
   uint64_t commit_data = get_commit_data(&dut, index);
-  state->record_inst(commit_pc, commit_instr, (probe.rfwen | probe.fpwen | probe.vecwen), probe.wdest, commit_data,
-                     probe.skip != 0, probe.special & 0x1, probe.lqIdx, probe.sqIdx, probe.robIdx, probe.isLoad,
-                     probe.isStore);
+  char dest_prefix = probe.vecwen ? 'v' : (probe.fpwen ? 'f' : 'x');
+  state->record_inst(commit_pc, commit_instr, (probe.rfwen | probe.fpwen | probe.vecwen), probe.wdest, dest_prefix,
+                     commit_data, probe.skip != 0, probe.special & 0x1, probe.lqIdx, probe.sqIdx, probe.robIdx,
+                     probe.isLoad, probe.isStore);
+  if (probe.rfwen && !probe.fpwen && !probe.vecwen && probe.wdest < 31 && probe.otherwpdest[0] != 0 &&
+      is_scalar_amocas_q(commit_instr)) {
+    uint64_t other_commit_data = get_other_commit_int_data(&dut, probe, 0);
+    state->record_inst(commit_pc, commit_instr, 1, probe.wdest + 1, 'x', other_commit_data, probe.skip != 0,
+                       probe.special & 0x1, probe.lqIdx, probe.sqIdx, probe.robIdx, probe.isLoad, probe.isStore);
+  }
 
 #ifdef FUZZING
   // isExit
