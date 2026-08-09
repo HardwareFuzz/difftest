@@ -35,6 +35,11 @@ VERILATOR_MAKE_JOBS = $(if $(strip $(EMU_BUILD_JOBS)),-j$(EMU_BUILD_JOBS),)
 # Optional parallelism for the Verilator frontend itself.
 # Reuse EMU_BUILD_JOBS so the slow C++ generation phase does not stay single-threaded.
 VERILATOR_FRONTEND_JOBS = $(if $(strip $(EMU_BUILD_JOBS)),-j $(EMU_BUILD_JOBS),)
+# Keep generated translation units small enough to compile within typical
+# workstation memory limits.  Callers can still tune both thresholds when a
+# different compile-time/memory trade-off is preferable.
+VERILATOR_OUTPUT_SPLIT ?= 5000
+VERILATOR_OUTPUT_SPLIT_CFUNCS ?= 5000
 
 # Verilator binary
 VERILATOR ?= verilator
@@ -98,8 +103,8 @@ VERILATOR_FLAGS_ALL =               \
   -Wno-STMTDLY -Wno-WIDTH           \
   --max-num-width 150000            \
   --assert --x-assign unique        \
-  --output-split 30000              \
-  --output-split-cfuncs 30000       \
+  --output-split $(VERILATOR_OUTPUT_SPLIT)        \
+  --output-split-cfuncs $(VERILATOR_OUTPUT_SPLIT_CFUNCS) \
   -I$(RTL_DIR)                      \
   -I$(GEN_VSRC_DIR)                 \
   -CFLAGS "$(VERILATOR_CXXFLAGS)"   \
