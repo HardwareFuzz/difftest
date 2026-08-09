@@ -126,6 +126,9 @@ int difftest_nstep(int step, bool enable_diff) {
         return ret;
     } else {
       difftest_set_dut();
+      for (int core = 0; core < NUM_CORES; core++) {
+        difftest[core]->record_commit_trace();
+      }
     }
     int status = difftest_state();
     if (status != STATE_RUNNING)
@@ -142,6 +145,48 @@ void difftest_switch_zone() {
 void difftest_set_dut() {
   for (int i = 0; i < NUM_CORES; i++) {
     difftest[i]->dut = diffstate_buffer[i]->next();
+  }
+}
+
+static inline uint64_t get_trace_other_commit_int_data(const DiffTestState *dut, const DifftestInstrCommit &probe,
+                                                       int slot) {
+#ifdef CONFIG_DIFFTEST_PHYINTREGSTATE
+  return dut->pregs_xrf.value[probe.otherwpdest[slot]];
+#else
+  return dut->regs.xrf.value[probe.wdest + slot + 1];
+#endif
+}
+
+static inline bool trace_is_scalar_amocas_q(uint64_t instr) {
+  constexpr uint64_t mask = 0xf800707fULL;
+  constexpr uint64_t match = 0x2800402fULL;
+  return (instr & mask) == match;
+}
+
+void Difftest::record_commit_trace() {
+  if (!get_commit_trace()) {
+    return;
+  }
+
+  for (int i = 0; i < CONFIG_DIFF_COMMIT_WIDTH; i++) {
+    auto &probe = dut->commit[i];
+    if (!probe.valid) {
+      continue;
+    }
+    const uint64_t commit_data = get_commit_data(dut, i);
+    const char dest_prefix = probe.vecwen ? 'v' : (probe.fpwen ? 'f' : 'x');
+    state->record_inst(probe.pc, probe.instr, (probe.rfwen | probe.fpwen | probe.vecwen), probe.wdest, dest_prefix,
+                       commit_data, probe.skip != 0, probe.special & 0x1, probe.lqIdx, probe.sqIdx, probe.robIdx,
+                       probe.isLoad, probe.isStore);
+    if (probe.rfwen && !probe.fpwen && !probe.vecwen && probe.wdest < 31 && probe.otherwpdest[0] != 0 &&
+        trace_is_scalar_amocas_q(probe.instr)) {
+      const uint64_t other_commit_data = get_trace_other_commit_int_data(dut, probe, 0);
+      state->record_inst(probe.pc, probe.instr, 1, probe.wdest + 1, 'x', other_commit_data, probe.skip != 0,
+                         probe.special & 0x1, probe.lqIdx, probe.sqIdx, probe.robIdx, probe.isLoad, probe.isStore);
+    }
+    // The normal instruction checker consumes each valid probe after recording it. Do the same
+    // in trace-only mode so buffered commit slots are not emitted again on later host steps.
+    probe.valid = 0;
   }
 }
 

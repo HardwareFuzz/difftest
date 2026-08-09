@@ -83,6 +83,8 @@ public:
 
   // Trigger a difftest checking procdure
   int step();
+  // Preserve the architectural commit stream when reference comparison is disabled.
+  void record_commit_trace();
 
   inline bool get_trap_valid() {
     return dut->trap.hasTrap || state->has_trap;
