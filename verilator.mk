@@ -46,6 +46,9 @@ VERILATOR_OUTPUT_GROUPS ?= 0
 
 # Verilator binary
 VERILATOR ?= verilator
+# GCC requires tens of GiB for a few very large generated functions even at
+# low optimization levels.  Clang keeps those translation units below 1 GiB.
+VERILATOR_CXX ?= clang++
 
 # Verilator version check
 VERILATOR_VER_CMD = $(VERILATOR) --version 2> /dev/null | cut -f2 -d' ' | tr -d '.'
@@ -151,7 +154,7 @@ EMU_COMPILE_FILTER =
 verilator-build-emu: $(SIM_EXTRA_OBJS)
 ifeq ($(REMOTE),localhost)
 	@sync -d $(BUILD_DIR) $(VERILATOR_BUILD_DIR)
-	$(TIME_CMD) $(MAKE) $(VERILATOR_MAKE_JOBS) -s VM_PARALLEL_BUILDS=1 OPT_SLOW="-O0" \
+	$(TIME_CMD) $(MAKE) $(VERILATOR_MAKE_JOBS) -s CXX="$(VERILATOR_CXX)" VM_PARALLEL_BUILDS=1 OPT_SLOW="-O0" \
 						OPT_FAST=$(OPT_FAST) \
 						PGO_CFLAGS="$(PGO_CFLAGS)" \
 						PGO_LDFLAGS="$(PGO_LDFLAGS)" \
@@ -161,6 +164,7 @@ else
 	ssh -tt $(REMOTE) 'export NOOP_HOME=$(NOOP_HOME); \
 					   $(MAKE) -C $(NOOP_HOME)/difftest verilator-build-emu \
 					   $(if $(strip $(EMU_BUILD_JOBS)),-j $(EMU_BUILD_JOBS),-j `nproc`) \
+					   VERILATOR_CXX="'"$(VERILATOR_CXX)"'" \
 					   OPT_FAST="'"$(OPT_FAST)"'" \
 					   PGO_CFLAGS="'"$(PGO_CFLAGS)"'" \
 					   PGO_LDFLAGS="'"$(PGO_LDFLAGS)"'" \
