@@ -40,6 +40,9 @@ VERILATOR_FRONTEND_JOBS = $(if $(strip $(EMU_BUILD_JOBS)),-j $(EMU_BUILD_JOBS),)
 # different compile-time/memory trade-off is preferable.
 VERILATOR_OUTPUT_SPLIT ?= 5000
 VERILATOR_OUTPUT_SPLIT_CFUNCS ?= 5000
+# Verilator otherwise derives output groups from -j and concatenates the
+# split sources back into a handful of very large unity translation units.
+VERILATOR_OUTPUT_GROUPS ?= 0
 
 # Verilator binary
 VERILATOR ?= verilator
@@ -103,6 +106,7 @@ VERILATOR_FLAGS_ALL =               \
   -Wno-STMTDLY -Wno-WIDTH           \
   --max-num-width 150000            \
   --assert --x-assign unique        \
+  --output-groups $(VERILATOR_OUTPUT_GROUPS)      \
   --output-split $(VERILATOR_OUTPUT_SPLIT)        \
   --output-split-cfuncs $(VERILATOR_OUTPUT_SPLIT_CFUNCS) \
   -I$(RTL_DIR)                      \
