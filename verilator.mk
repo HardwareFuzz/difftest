@@ -38,8 +38,8 @@ VERILATOR_FRONTEND_JOBS = $(if $(strip $(EMU_BUILD_JOBS)),-j $(EMU_BUILD_JOBS),)
 # Keep generated translation units small enough to compile within typical
 # workstation memory limits.  Callers can still tune both thresholds when a
 # different compile-time/memory trade-off is preferable.
-VERILATOR_OUTPUT_SPLIT ?= 5000
-VERILATOR_OUTPUT_SPLIT_CFUNCS ?= 5000
+VERILATOR_OUTPUT_SPLIT ?= 1000
+VERILATOR_OUTPUT_SPLIT_CFUNCS ?= 1000
 # Verilator otherwise derives output groups from -j and concatenates the
 # split sources back into a handful of very large unity translation units.
 VERILATOR_OUTPUT_GROUPS ?= 0
