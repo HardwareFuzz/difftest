@@ -164,10 +164,6 @@ static inline bool trace_is_scalar_amocas_q(uint64_t instr) {
 }
 
 void Difftest::record_commit_trace() {
-  if (!get_commit_trace()) {
-    return;
-  }
-
   for (int i = 0; i < CONFIG_DIFF_COMMIT_WIDTH; i++) {
     auto &probe = dut->commit[i];
     if (!probe.valid) {
