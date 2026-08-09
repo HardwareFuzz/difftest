@@ -91,7 +91,7 @@ VERILATOR_FLAGS += --coverage-line --coverage-toggle
 endif
 
 # C optimization
-OPT_FAST ?= -O3
+OPT_FAST ?= -O1
 
 ########## Verilator Build Recipes ##########
 VERILATOR_FLAGS_ALL =               \
